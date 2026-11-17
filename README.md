@@ -41,8 +41,13 @@ unreadable image, non-empty output folder, bad csv) prints `Error: ...` and exit
 | `classes.txt` | classifier output order: `black, broken, good, husk, immature, parchment, shell` |
 | `config.json` | optional preprocessing values (if missing, the defaults in `infer.py` are used) |
 | `*/metadata.yaml` | export information from Ultralytics (not read by `infer.py`) |
+| `source_pt/best.pt` | original Ultralytics/PyTorch weights of the classifier before NCNN export (reference only, **not used by `infer.py`**) |
+| `source_pt/bean_finder.pt` | original Ultralytics/PyTorch weights of the bean finder (reference only, **not used by `infer.py`**) |
 
-Both models were trained with Ultralytics 8.4.208 and exported with `yolo export format=ncnn`.
+Both models were trained with Ultralytics 8.4.208 and exported with `yolo export format=ncnn`
+(`yolo export model=best.pt format=ncnn imgsz=224`, `yolo export model=bean_finder.pt format=ncnn imgsz=1024`).
+The `.pt` files are included only for reference: PyTorch cannot be installed on Pi OS 32-bit, so `infer.py` runs
+the NCNN files above.
 
 ## Preprocessing / pipeline (fixed, no random or test-time augmentation)
 
