@@ -55,8 +55,9 @@ Both models were trained with Ultralytics 8.4.208 and exported with `yolo export
 4. Drop boxes whose area is outside 0.2–3.0 × median area or whose long/short side > 4.
 5. Crop each bean with 10 % padding per side → resize short side to 224 (bilinear) → center crop 224 → RGB/255
    (no mean/std) → classifier → class per bean.
-6. **Majority vote** of bean classes = image class (tie → class seen first). If no bean is found, the whole
-   image is classified so every image still gets a valid class.
+6. **Vote** over beans = image class. `weights/config.json` `"vote": "probsum"` (used in this submission) picks the
+   class with the highest summed bean probability; `"majority"` (code default) counts bean votes (tie → class seen
+   first). If no bean is found, the whole image is classified so every image still gets a valid class.
 
 ncnn is forced to fp32 (ncnn's ARM default fp16 changed probabilities slightly in our tests).
 

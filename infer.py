@@ -46,6 +46,7 @@ DEFAULT_CONFIG = {
     "max_aspect": 4.0,       # long side / short side
     "pad": 0.10,             # crop padding per side (fraction of box size)
     "cls_imgsz": 224,        # classifier input
+    "vote": "majority",      # "majority" = most bean votes · "probsum" = highest summed bean probability
 }
 
 
@@ -222,6 +223,10 @@ def find_beans(m, image):
 
 
 def classify_crop(m, crop):
+    return m["names"][int(m["np"].argmax(classify_probs(m, crop)))]
+
+
+def classify_probs(m, crop):
     """ultralytics classify_transforms: resize short side (BILINEAR) -> center crop -> /255 (no mean/std)."""
     np, Image, size = m["np"], m["Image"], int(m["cfg"]["cls_imgsz"])
     w, h = crop.size
@@ -234,23 +239,35 @@ def classify_crop(m, crop):
     probs = run_net(m["ncnn"], np, m["classifier"], chw).reshape(-1)
     if probs.size != len(m["names"]) or not bool(np.isfinite(probs).all()):
         raise ValueError("Invalid class probabilities from the classifier")
-    return m["names"][int(np.argmax(probs))]
+    return probs
+
+
+def crop_bean(image, box, pad):
+    x1, y1, x2, y2 = box
+    pw, ph = (x2 - x1) * pad, (y2 - y1) * pad
+    return image.crop((max(0, x1 - pw), max(0, y1 - ph), min(image.width, x2 + pw), min(image.height, y2 + ph)))
+
+
+def load_image(m, path):
+    with m["Image"].open(path) as original:
+        return normalize(m, m["ImageOps"].exif_transpose(original))
 
 
 def predict_image(m, path):
     """-> (class name, number of beans used, vote counter)."""
-    with m["Image"].open(path) as original:
-        image = normalize(m, m["ImageOps"].exif_transpose(original))
+    np, names = m["np"], m["names"]
+    image = load_image(m, path)
     boxes = find_beans(m, image)
-    pad = m["cfg"]["pad"]
-    votes = Counter()
-    for x1, y1, x2, y2 in boxes:
-        pw, ph = (x2 - x1) * pad, (y2 - y1) * pad
-        crop = image.crop((max(0, x1 - pw), max(0, y1 - ph), min(image.width, x2 + pw), min(image.height, y2 + ph)))
-        votes[classify_crop(m, crop)] += 1
-    if not votes:  # no bean found: classify the whole image so every image still gets a valid class
-        votes[classify_crop(m, image)] += 1
-    prediction = votes.most_common(1)[0][0]  # tie -> class seen first (box order by score)
+    probs = [classify_probs(m, crop_bean(image, box, m["cfg"]["pad"])) for box in boxes]
+    if not probs:  # no bean found: classify the whole image so every image still gets a valid class
+        probs = [classify_probs(m, image)]
+    votes = Counter(names[int(np.argmax(p))] for p in probs)
+    if m["cfg"]["vote"] == "probsum":
+        prediction = names[int(np.argmax(np.sum(probs, axis=0)))]
+    elif m["cfg"]["vote"] == "majority":
+        prediction = votes.most_common(1)[0][0]  # tie -> class seen first (box order by score)
+    else:
+        raise ValueError(f"config vote must be 'majority' or 'probsum', got {m['cfg']['vote']!r}")
     if prediction not in CLASSES:
         raise ValueError(f"Invalid predicted class {prediction!r}")
     return prediction, len(boxes), votes
