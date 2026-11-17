@@ -1,6 +1,6 @@
-description: Ultralytics YOLO26n-cls model trained on /Users/stamp/Desktop/TGR2026-live/datasets/day1_cls_s75q40
+description: Ultralytics YOLO26n-cls model trained on /Users/stamp/Desktop/TGR2026-live/datasets/day1_cls_s75q40_piles
 author: Ultralytics
-date: "2026-11-17T13:28:28.967339+07:00"
+date: "2026-11-17T14:10:56.640666+07:00"
 version: "8.4.208"
 license: AGPL-3.0 License (https://ultralytics.com/license)
 docs: https://docs.ultralytics.com

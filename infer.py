@@ -303,7 +303,7 @@ def run(args):
     for label in CLASSES:
         (output / label).mkdir()
     with (output / "predictions.csv").open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.writer(csv_file)
+        writer = csv.writer(csv_file, lineterminator="\n")
         writer.writerow(["filename", "class"])
         for index, path in enumerate(images, 1):
             try:

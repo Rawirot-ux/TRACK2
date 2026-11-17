@@ -37,7 +37,7 @@ unreadable image, non-empty output folder, bad csv) prints `Error: ...` and exit
 | File | What it is |
 |---|---|
 | `bean_finder_ncnn_model/model.ncnn.param` + `.bin` | bean finder: YOLO26n detection, 1 class, input 1024×1024 |
-| `cls_ncnn_model/model.ncnn.param` + `.bin` | bean classifier: YOLO26n-cls, 7 classes, input 224×224 |
+| `cls_ncnn_model/model.ncnn.param` + `.bin` | bean classifier: YOLO26n-cls, 7 classes, input 224×224 · trained on bean crops from the organizer's circle/square images plus crops from simulated piles made from those same images |
 | `classes.txt` | classifier output order: `black, broken, good, husk, immature, parchment, shell` |
 | `config.json` | optional preprocessing values (if missing, the defaults in `infer.py` are used) |
 | `*/metadata.yaml` | export information from Ultralytics (not read by `infer.py`) |
@@ -63,6 +63,9 @@ ncnn is forced to fp32 (ncnn's ARM default fp16 changed probabilities slightly i
 
 ## Verified (MacBook, ncnn 1.0.20261020, numpy 2.5.4, pillow 13.0.0)
 
-- Same predictions, bean counts and votes as the original Ultralytics `.pt` pipeline on our 7 validation images.
+- NCNN models give the same bean counts, predictions and votes as the Ultralytics `.pt` models on our 7 held-out
+  validation images (`grid_*`, not used for training).
+- Held-out results: 7/7 validation images; 70/70 simulated piles built only from validation beans
+  (random positions with gaps, 9–20 beans); bean finder found 1017/1017 beans in those piles.
 - Error cases above exit with code 1; normal runs exit with code 0.
 - Not yet tested on a real Pi OS 32-bit board.
