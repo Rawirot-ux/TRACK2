@@ -52,6 +52,8 @@ def parse_args():
     p.add_argument("--dropout", type=float, default=0.0)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--device", default="mps", help="mps (Mac) / 0 (NVIDIA GPU) / cpu")
+    p.add_argument("--freeze", type=int, default=None, help="freeze first N layers (None = train all)")
+    p.add_argument("--optimizer", default="auto", help="auto ignores --lr0; e.g. AdamW / SGD to use --lr0")
     return p.parse_args()
 
 
@@ -250,6 +252,7 @@ def main():
     model = YOLO(a.base_model)
     model.train(data=str(ds), imgsz=a.imgsz, epochs=a.epochs, patience=a.patience, batch=a.batch,
                 lr0=a.lr0, weight_decay=a.weight_decay, dropout=a.dropout, seed=a.seed, device=a.device,
+                freeze=a.freeze, optimizer=a.optimizer,
                 hsv_h=0.0, hsv_s=0.3, degrees=180, flipud=0.5,  # colour cues matter: no hue shift
                 project=str(out), name="train", exist_ok=False)
     best = out / "train" / "weights" / "best.pt"

@@ -40,17 +40,15 @@ Any error (missing input/weights, no images, unreadable image, `--out` inside th
 | File | What it is |
 |---|---|
 | `bean_finder_ncnn_model/model.ncnn.param` + `.bin` | bean finder: YOLO26n detection, 1 class, input 1024×1024 |
-| `cls_ncnn_model/model.ncnn.param` + `.bin` | bean classifier: YOLO26n-cls, 7 classes, input 224×224 · trained on bean crops from the organizer's circle/square images plus crops from simulated piles made from those same images |
+| `cls_ncnn_model/model.ncnn.param` + `.bin` | bean classifier: YOLO26n-cls, 7 classes, input 224×224 · model **"E8"**: started from our earlier coffee-bean classifier (`coffee_cls.pt`, trained on a public coffee-bean dataset) and fine-tuned on bean crops from the organizer's circle/square images plus crops from simulated piles made from those same images |
 | `classes.txt` | classifier output order: `black, broken, good, husk, immature, parchment, shell` |
 | `config.json` | optional preprocessing values (if missing, the defaults in `infer.py` are used) |
-| `*/metadata.yaml` | export information from Ultralytics (not read by `infer.py`) |
-| `source_pt/best.pt` | original Ultralytics/PyTorch weights of the classifier before NCNN export (reference only, **not used by `infer.py`**) |
-| `source_pt/bean_finder.pt` | original Ultralytics/PyTorch weights of the bean finder (reference only, **not used by `infer.py`**) |
+| `*/metadata.yaml` | export information from Ultralytics · `infer.py` reads its `task:` line to tell the finder (`detect`) from the classifier (`classify`) |
 
 Both models were trained with Ultralytics 8.4.208 and exported with `yolo export format=ncnn`
 (`yolo export model=best.pt format=ncnn imgsz=224`, `yolo export model=bean_finder.pt format=ncnn imgsz=1024`).
-The `.pt` files are included only for reference: PyTorch cannot be installed on Pi OS 32-bit, so `infer.py` runs
-the NCNN files above.
+The PyTorch `.pt` files are not in this repository (PyTorch cannot be installed on Pi OS 32-bit; `infer.py` runs
+the NCNN files above).
 
 ## Preprocessing / pipeline (fixed, no random or test-time augmentation)
 
@@ -73,8 +71,9 @@ ncnn is forced to fp32 (ncnn's ARM default fp16 changed probabilities slightly i
 
 - NCNN models give the same bean counts, predictions and votes as the Ultralytics `.pt` models on our 7 held-out
   validation images (`grid_*`, not used for training).
-- Held-out results: 7/7 validation images; 70/70 simulated piles built only from validation beans
-  (random positions with gaps, 9–20 beans); bean finder found 1017/1017 beans in those piles.
+- Held-out results (model E8): 7/7 validation images; 70/70 simulated piles built only from validation beans
+  (random positions with gaps, 9–20 beans); 69/70 harder simulated piles (beans touching, shadows, brightness and
+  size changes); 5/5 re-compressed validation images. Bean finder found 1017/1017 beans in the 70 piles.
 - Error cases above exit with code 1; normal runs exit with code 0.
 - Not yet tested on a real Pi OS 32-bit board.
 
@@ -84,8 +83,9 @@ ncnn is forced to fp32 (ncnn's ARM default fp16 changed probabilities slightly i
 Training needs `pip install ultralytics==8.4.208` (PyTorch, OpenCV); it is not part of `requirements.txt`.
 
 ```bash
-python train.py --data day1_data --out runs_train/e1 --finder weights/source_pt/bean_finder.pt \
-    --base-model yolo26n-cls.pt --weights weights
+# submitted model E8 (bean_finder.pt and coffee_cls.pt are our own earlier PyTorch weights, not in this repo)
+python train.py --data day1_data --out runs_train/e8 --finder bean_finder.pt \
+    --base-model coffee_cls.pt --weights weights
 ```
 
 Steps: normalize every image (as in `infer.py`) → bean finder crops, split by image (`grid_*` = validation) →
@@ -94,4 +94,6 @@ the `infer.py` pipeline → YOLO26n-cls training (imgsz 224, 50 epochs, patience
 weight_decay 0.0005, hsv_h 0, hsv_s 0.3, degrees 180, flipud 0.5, seed 0) → NCNN export.
 Result: `<out>/weights_new/` (same layout as `weights/`); test it with `infer.py --weights <out>/weights_new`
 before replacing `weights/`. Hyper-parameters can be changed with `--epochs --patience --batch --imgsz --lr0
---weight-decay --dropout --base-model --piles-per-image`. GPU/MPS training is not bit-exact between machines.
+--weight-decay --dropout --base-model --piles-per-image --freeze --optimizer`. With the default `--optimizer auto`
+Ultralytics picks AdamW and its own learning rate and ignores `--lr0`; set `--optimizer AdamW` (or `SGD`) to use
+`--lr0`. GPU/MPS training is not bit-exact between machines.
