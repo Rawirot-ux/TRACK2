@@ -12,9 +12,9 @@ Runs on Raspberry Pi 4 CPU (Pi OS 32-bit, Python 3.13) using only ncnn + numpy +
 Usage:
   python infer.py --input test/ --weights weights/ --out outputs/
 
-weights/ must contain:
-  bean_finder_ncnn_model/model.ncnn.param + model.ncnn.bin
-  cls_ncnn_model/model.ncnn.param + model.ncnn.bin
+weights/ contains two NCNN param/binary pairs, discovered recursively.
+  Model roles come from metadata.yaml task: detect/classify or models.json.
+  Optional models.json selects arbitrary filenames/extensions explicitly.
   classes.txt   (class names in model output order, one per line)
   config.json   (optional; preprocessing values, see DEFAULT_CONFIG)
 """
@@ -23,6 +23,7 @@ import argparse
 import csv
 import io
 import json
+import re
 import shutil
 import sys
 from collections import Counter
@@ -63,10 +64,78 @@ def parse_args():
 
 
 # ---------------------------------------------------------------- models
-def load_net(ncnn, model_dir, threads):
-    param, binary = model_dir / "model.ncnn.param", model_dir / "model.ncnn.bin"
-    if not param.is_file() or not binary.is_file():
-        raise ValueError(f"Missing model.ncnn.param / model.ncnn.bin in {model_dir}")
+def discover_models(weights):
+    """Find the two NCNN model pairs, or read explicit paths from models.json."""
+    if not weights.is_dir():
+        raise ValueError(f"--weights must be a folder: {weights}")
+
+    def local_file(value):
+        path = (weights / value).resolve()
+        if weights.resolve() not in path.parents or not path.is_file():
+            raise ValueError(f"Model file must exist inside the weights folder: {value}")
+        return path
+
+    manifest = weights / "models.json"
+    if manifest.is_file():
+        data = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict) or set(data) != {"finder", "classifier"}:
+            raise ValueError("models.json must contain exactly finder and classifier")
+        models = {}
+        for role in ("finder", "classifier"):
+            entry = data[role]
+            if not isinstance(entry, dict) or set(entry) != {"param", "bin"}:
+                raise ValueError(f"models.json {role} must contain param and bin paths")
+            models[role] = (local_file(entry["param"]), local_file(entry["bin"]))
+        if len(set(path for pair in models.values() for path in pair)) != 4:
+            raise ValueError("models.json must identify four distinct model files")
+        return models
+
+    candidates = {"finder": [], "classifier": []}
+    files = sorted(path for path in weights.rglob("*") if path.is_file())
+    for param in files:
+        # NCNN text graphs start with this magic number, independent of extension.
+        with param.open("rb") as stream:
+            if stream.read(32).splitlines()[0:1] != [b"7767517"]:
+                continue
+        role = None
+        metadata = param.parent / "metadata.yaml"
+        if metadata.is_file():
+            match = re.search(r"^task:\s*['\"]?(classify|detect)['\"]?\s*(?:#.*)?$",
+                              metadata.read_text(encoding="utf-8-sig"), re.MULTILINE)
+            if match:
+                role = {"classify": "classifier", "detect": "finder"}[match.group(1)]
+        if role is None:
+            role = {FINDER_DIR: "finder", CLASSIFIER_DIR: "classifier"}.get(param.parent.name)
+        if role is None:
+            raise ValueError(f"Cannot identify model role for {param}; provide models.json")
+        conventional = param.with_suffix(".bin")
+        if conventional != param and conventional.is_file():
+            binaries = [conventional]
+        else:
+            # Accept arbitrary binary names/extensions; never guess among multiple files.
+            binaries = []
+            for path in files:
+                if path.parent != param.parent or path == param:
+                    continue
+                with path.open("rb") as stream:
+                    sample = stream.read(4096)
+                try:
+                    sample.decode("utf-8")
+                    binary = b"\x00" in sample
+                except UnicodeDecodeError:
+                    binary = True
+                if binary:
+                    binaries.append(path)
+        if len(binaries) != 1:
+            raise ValueError(f"Expected one NCNN binary for {param}; provide models.json to select it")
+        candidates[role].append((param, binaries[0]))
+    if any(len(pairs) != 1 for pairs in candidates.values()):
+        raise ValueError("Expected one finder and one classifier NCNN model; provide models.json for ambiguous layouts")
+    return {role: pairs[0] for role, pairs in candidates.items()}
+
+
+def load_net(ncnn, model_files, threads):
+    param, binary = model_files
     net = ncnn.Net()
     net.opt.use_vulkan_compute = False
     net.opt.num_threads = threads
@@ -77,7 +146,7 @@ def load_net(ncnn, model_dir, threads):
     if hasattr(net.opt, "use_bf16_storage"):
         net.opt.use_bf16_storage = False
     if net.load_param(str(param)) != 0 or net.load_model(str(binary)) != 0:
-        raise ValueError(f"ncnn could not load the model in {model_dir}")
+        raise ValueError(f"ncnn could not load {param} and {binary}")
     return net
 
 
@@ -97,6 +166,7 @@ def run_net(ncnn, np, net, chw):
 
 
 def load_models(weights, threads):
+    model_files = discover_models(weights)
     try:
         import ncnn
         import numpy as np
@@ -122,8 +192,8 @@ def load_models(weights, threads):
             raise ValueError(f"Unknown keys in {config_file}: {sorted(unknown)}")
         config.update(extra)
 
-    finder = load_net(ncnn, weights / FINDER_DIR, threads)
-    classifier = load_net(ncnn, weights / CLASSIFIER_DIR, threads)
+    finder = load_net(ncnn, model_files["finder"], threads)
+    classifier = load_net(ncnn, model_files["classifier"], threads)
     return {"ncnn": ncnn, "np": np, "Image": Image, "ImageOps": ImageOps,
             "finder": finder, "classifier": classifier, "names": names, "cfg": config}
 
