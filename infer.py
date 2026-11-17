@@ -26,6 +26,7 @@ import json
 import re
 import shutil
 import sys
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -354,8 +355,8 @@ def run(args):
         raise ValueError(f"Input does not exist: {source}")
     if source.is_dir() and (output == source or source in output.parents or output in source.parents):
         raise ValueError("Input and output folders must be separate and must not contain one another")
-    if output.exists() and (not output.is_dir() or any(output.iterdir())):
-        raise ValueError("Output must be a new or empty folder to avoid overwriting earlier results")
+    if output.exists() and not output.is_dir():
+        raise ValueError(f"--out exists and is not a folder: {output}")
     images = sorted(
         (p for p in source.rglob("*") if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS)
         if source.is_dir() else ([source] if source.suffix.lower() in IMAGE_EXTENSIONS else [])
@@ -370,21 +371,35 @@ def run(args):
     model = load_models(weights, args.threads)
 
     output.mkdir(parents=True, exist_ok=True)
+    # A previous run (or the sample outputs/ shipped with the submission) is replaced: only the files this
+    # program writes (predictions.csv and the 7 class folders) are removed; anything else is left alone.
+    old = [output / "predictions.csv"] + [output / label for label in CLASSES]
+    if any(p.exists() for p in old):
+        print(f"Note: replacing previous results in {output}", flush=True)
+    for p in old:
+        if p.is_dir():
+            shutil.rmtree(p)
+        elif p.exists():
+            p.unlink()
     for label in CLASSES:
         (output / label).mkdir()
     with (output / "predictions.csv").open("w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file, lineterminator="\n")
         writer.writerow(["filename", "class"])
+        times = []
         for index, path in enumerate(images, 1):
+            start = time.perf_counter()
             try:
                 prediction, n_beans, votes = predict_image(model, path)
             except Exception as exc:
                 raise RuntimeError(f"Failed on {path.name}: {exc}") from exc
+            times.append(time.perf_counter() - start)  # read image -> class (excludes copy/csv)
             shutil.copy2(path, output / prediction / path.name)
             writer.writerow([path.name, prediction])
             csv_file.flush()
             vote_text = " ".join(f"{k}:{v}" for k, v in votes.most_common())
-            print(f"[{index}/{len(images)}] {path.name}: {prediction} ({n_beans} beans; {vote_text})", flush=True)
+            print(f"[{index}/{len(images)}] {path.name}: {prediction} ({n_beans} beans; {vote_text}) "
+                  f"{times[-1]:.2f} s", flush=True)
 
     # check the written file: header + one row per image, unique, valid class
     with (output / "predictions.csv").open(newline="", encoding="utf-8") as csv_file:
@@ -392,6 +407,8 @@ def run(args):
     if rows[0] != ["filename", "class"] or len(rows) - 1 != len(images) \
             or len({r[0] for r in rows[1:]}) != len(images) or any(r[1] not in CLASSES for r in rows[1:]):
         raise RuntimeError("predictions.csv failed the format check")
+    print(f"Time per image: mean {sum(times) / len(times):.2f} s, max {max(times):.2f} s "
+          f"(model loading excluded)")
     print(f"Saved {len(images)} predictions to {output / 'predictions.csv'}")
 
 
